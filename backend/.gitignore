@@ -1,0 +1,22 @@
+# Dossier de compilation Maven (ne jamais versionner)
+target/
+*.class
+
+# IDE (VS Code / IntelliJ)
+.idea/
+*.iml
+.vscode/
+
+# Logs (les fichiers de log ne vont jamais dans Git)
+*.log
+logs/
+
+# Configuration locale personnelle (secrets, URLs locales...)
+# → chacun garde son application-local.yml chez soi, jamais partagé
+application-local.yml
+application-*.local.yml
+
+# Fichiers d'environnement (secrets, clés API...) — À NE JAMAIS COMMITTER
+.env
+.env.*
+!.env.example

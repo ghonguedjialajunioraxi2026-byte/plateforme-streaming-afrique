@@ -1,0 +1,148 @@
+# ============================================================
+# PROFIL : production
+# Usage : serveur de production (VPS / Docker en ligne)
+#
+# Activation :
+#   java -jar target/backend-0.0.1-SNAPSHOT.jar --spring.profiles.active=prod
+#   # ou via variable d'environnement :
+#   SPRING_PROFILES_ACTIVE=prod java -jar target/backend-0.0.1-SNAPSHOT.jar
+# ============================================================
+
+server:
+  port: 8080
+
+  # En production : on ne renvoie JAMAIS le détail des erreurs au client
+  # (un hacker ne doit pas voir les piles d'exécution ni les messages internes)
+  error:
+    include-message: never
+    include-stacktrace: never
+
+# CORS EN PRODUCTION : le(s) domaine(s) officiel(s) du frontend.
+# Valeur injectée par l'environnement du serveur (jamais en dur ici).
+# Elle s'applique aussi à la poignée de main WebSocket (/ws), sauf si
+# WS_ALLOWED_ORIGINS est défini séparément (voir application.yml).
+app:
+  cors:
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:https://app.streaming-afrique.com}
+
+  # Seed INTERDIT en production (7.25) : les données de référence prod
+  # seront posées par migration/versionnage, jamais par un runner au boot.
+  seed:
+    reference-data: false
+
+  # Paiements (étape 14) : sandbox INTERDIT en prod — seuls les prestataires
+  # réellement câblés répondent (les autres → 503). Secrets OBLIGATOIRES via
+  # l'environnement (échec rapide si absents, comme DB_PASSWORD/JWT_SECRET).
+  payments:
+    sandbox-enabled: false
+    webhook-secret: ${PAYMENT_WEBHOOK_SECRET}
+    expiry-after: ${PAYMENTS_EXPIRY_AFTER:30m}
+
+  # ----------------------------------------------------------
+  # JWT (étape 6.24) : JWT_SECRET est OBLIGATOIRE en production.
+  # Comme DB_PASSWORD, il vient du serveur (environnement), jamais de Git.
+  # Si manquant, l'application REFUSE de démarrer (échec rapide = sécurité) —
+  # aucune clé éphémère de secours ici, contrairement au développement.
+  #   JWT_SECRET            → clé HMAC-SHA256 ≥ 32 octets (openssl rand -base64 48)
+  #   JWT_ACCESS_TOKEN_TTL  → durée de vie token d'accès  (défaut 15m)
+  #   JWT_REFRESH_TOKEN_TTL → durée de vie refresh token   (défaut 7d)
+  #   JWT_ISSUER            → émetteur attendu
+  # ----------------------------------------------------------
+  security:
+    jwt:
+      secret: ${JWT_SECRET}
+      access-token-ttl: ${JWT_ACCESS_TOKEN_TTL:15m}
+      refresh-token-ttl: ${JWT_REFRESH_TOKEN_TTL:7d}
+      issuer: ${JWT_ISSUER:streaming-afrique-backend}
+
+# ------------------------------------------------------------
+# PostgreSQL (production).
+# AUCUN secret ni valeur par défaut : toutes les valeurs viennent
+# de l'environnement. Si DB_PASSWORD est manquant, l'application
+# REFUSE de démarrer (échec rapide = sécurité).
+# ------------------------------------------------------------
+spring:
+  datasource:
+    url: jdbc:postgresql://${DB_HOST}:${DB_PORT}/${DB_NAME}
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
+    driver-class-name: org.postgresql.Driver
+    # Pool : adapté à une charge réelle ; jamais "*" de pool par défaut idéal
+    hikari:
+      maximum-pool-size: 20
+      minimum-idle: 5
+      connection-timeout: 30000
+
+  jpa:
+    hibernate:
+      # En production on ne modifie JAMAIS le schéma automatiquement :
+      # il vient EXCLUSIVEMENT des migrations Flyway (7.24), appliquées
+      # dans l'ordre au démarrage (échec = démarrage refusé, base intacte).
+      ddl-auto: none
+
+  # ----------------------------------------------------------
+  # Flyway (7.24) : STRICT en production — pas de baseline automatique
+  # (base neuve ou déjà migrée uniquement), validation des checksums.
+  # ----------------------------------------------------------
+  flyway:
+    enabled: true
+    baseline-on-migrate: false
+    validate-on-migrate: true
+
+  # ----------------------------------------------------------
+  # Redis (production : Redis Cloud, AWS ElastiCache, serveur dédié…).
+  # AUCUNE valeur par défaut : si REDIS_HOST/PORT/PASSWORD sont manquants,
+  # l'application REFUSE de démarrer (échec rapide = sécurité).
+  # ----------------------------------------------------------
+  data:
+    redis:
+      host: ${REDIS_HOST}
+      port: ${REDIS_PORT}
+      password: ${REDIS_PASSWORD}
+      ssl:
+        # Le TLS est requis sur les Redis managés (ElastiCache, Redis Cloud…)
+        enabled: ${REDIS_SSL:true}
+
+# --- Monitoring en production : surface minimale, aucun détail interne ---
+# /actuator/prometheus est EXPOSÉ mais réservé au réseau interne (scrape
+# Prometheus) : le reverse proxy public ne route JAMAIS /actuator/**.
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      show-details: never
+      show-components: never
+
+springdoc:
+  # Documentation OpenAPI : désactivée en prod (réduit la surface, évite
+  # d'exposer la forme de l'API au public ; la doc reste en dev + tests).
+  api-docs:
+    enabled: false
+  swagger-ui:
+    enabled: false
+
+logging:
+  # Niveau INFO (le DEBUG ralentit et expose trop de choses en prod ;
+  # JAMAIS de mot de passe / token / secret : voir règle 6.28)
+  level:
+    root: INFO
+    com.streamingafrique: INFO
+    org.hibernate.SQL: WARN
+
+  # En prod on écrit les logs dans un fichier en PLUS de la console
+  # (utile pour les journaux d'audit ; dossier logs/ est ignoré par Git)
+  file:
+    name: logs/backend.log
+
+# ------------------------------------------------------------
+# Règle d'or des secrets (rappel permanent) :
+#   - JAMAIS de secret en dur dans ce fichier ni dans Git
+#   - le serveur fournit les variables DB_* / CORS_* / JWT_SECRET via
+#     l'environnement (Docker -e, systemd Environment=...) — c'est le seul
+#     endroit où ces secrets existent réellement
+#   - les prochains secrets (clés pistement/paiement...) suivront
+#     exactement la même règle
+# ------------------------------------------------------------

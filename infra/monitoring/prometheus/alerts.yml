@@ -1,0 +1,42 @@
+# FLICK — alertes mesurables (routing Alertmanager : étape suivante).
+groups:
+  - name: flick
+    interval: 30s
+    rules:
+      - alert: BackendDown
+        expr: up{job="flick-backend"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Backend FLICK injoignable (scrape Prometheus)"
+
+      - alert: High5xxRate
+        expr: |
+          sum(rate(http_server_requests_seconds_count{status=~"5.."}[5m]))
+          /
+          sum(rate(http_server_requests_seconds_count[5m])) > 0.05
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Taux d'erreurs 5xx > 5 % sur 5 min"
+
+      - alert: HighLatencyP95
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(http_server_requests_seconds_bucket[5m])) by (le)) > 2
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Latence API p95 > 2 s sur 10 min"
+
+      - alert: JwtUnauthorizedSpike
+        expr: |
+          sum(rate(http_server_requests_seconds_count{status="401"}[5m])) > 5
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Pic de 401 (> 5/s) — possible force-brute ou incident auth"

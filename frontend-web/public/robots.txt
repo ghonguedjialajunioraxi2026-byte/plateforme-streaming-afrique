@@ -1,0 +1,5 @@
+# FLICK — bêta publique : indexation autorisée (pages publiques uniquement,
+# jamais les espaces connectés). Environnement de recette : tout interdire
+# (Disallow: /) via surcharge serveur, pas ce fichier versionné.
+User-agent: *
+Allow: /

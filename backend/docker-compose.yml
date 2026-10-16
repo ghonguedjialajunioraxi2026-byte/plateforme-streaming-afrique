@@ -1,0 +1,102 @@
+# ============================================================
+# Streaming Afrique — stack de DÉVELOPPEMENT local
+#   backend (profil Spring "dev") + PostgreSQL 16 + Redis 7
+#
+# Usage (depuis backend/) :
+#   docker compose up -d --build   # démarre tout
+#   docker compose logs -f backend # suit les logs de l'API
+#   curl localhost:8080/api/health # sonde métier
+#   docker compose down            # arrête (les volumes gardent les données)
+#   docker compose down -v         # arrête + repart de zéro (base effacée)
+#
+# SECRETS (règle permanente du projet) :
+#   - les valeurs ci-dessous sont des défauts LOCAUX, faibles et
+#     marqués "dev-only" : pratiques pour coder, INUTILISABLES en prod ;
+#   - pour surcharger sans toucher ce fichier : créer un `.env`
+#     (git-ignoré, voir .env.example) — ex. DB_PASSWORD=mot-de-passe-fort ;
+#   - en production, le profil "prod" EXIGE de vrais secrets via
+#     l'environnement du serveur (jamais dans Git, jamais dans l'image).
+# ============================================================
+
+services:
+  # ----------------------------------------------------------
+  # PostgreSQL : base du profil dev (ddl-auto=update : Hibernate
+  # crée/ajuste les tables au démarrage, données conservées).
+  # ----------------------------------------------------------
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_NAME:-streaming_afrique}
+      POSTGRES_USER: ${DB_USERNAME:-streaming}
+      # DEV-ONLY : surchargeable via .env (DB_PASSWORD=...).
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-dev-only-changeme}
+    ports:
+      # Exposé pour psql/pgAdmin depuis le poste (inutile au backend,
+      # qui joint postgres:5432 via le réseau interne compose).
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME:-streaming} -d ${DB_NAME:-streaming_afrique}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # ----------------------------------------------------------
+  # Redis : cache, présence, rate-limiting (repli mémoire si absent,
+  # mais ici il est présent : comportement réel testé en local).
+  # ----------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    # appendonly = les données survivent au redémarrage du conteneur.
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      # Exposé pour redis-cli depuis le poste (même remarque que postgres).
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # ----------------------------------------------------------
+  # Backend : image construite depuis ./Dockerfile (profil dev).
+  # Ne démarre QU'après postgres+redis sains (depends_on + healthcheck).
+  # ----------------------------------------------------------
+  backend:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      SPRING_PROFILES_ACTIVE: dev
+      # Base via le réseau interne compose (noms de services = hôtes DNS).
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: ${DB_NAME:-streaming_afrique}
+      DB_USERNAME: ${DB_USERNAME:-streaming}
+      DB_PASSWORD: ${DB_PASSWORD:-dev-only-changeme}
+      # Cache via le réseau interne compose.
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      # DEV-ONLY (≥ 32 octets, sinon clé éphémère + warning au démarrage).
+      JWT_SECRET: ${JWT_SECRET:-dev-jwt-cle-locale-32-octets-minimum-ok}
+      # Uploads persistés dans un volume (sinon perdus à chaque rebuild).
+      STORAGE_LOCATION: /app/uploads
+    ports:
+      - "8080:8080"
+    volumes:
+      - uploads:/app/uploads
+
+volumes:
+  # Base, cache et fichiers : survivent aux `compose down` (pas aux `-v`).
+  pgdata:
+  redisdata:
+  uploads:

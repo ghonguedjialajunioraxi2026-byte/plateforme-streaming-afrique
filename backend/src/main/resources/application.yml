@@ -1,0 +1,382 @@
+# ============================================================
+# CONFIGURATION COMMUNE — s'applique à TOUS les environnements
+#
+# Principe des profils Spring Boot :
+#   - ce fichier  → valeurs communes (ne change jamais selon l'env)
+#   - application-dev.yml  → vient SE SUPERPOSER en développement
+#   - application-prod.yml → vient SE SUPERPOSER en production
+#
+# Un profil s'active au lancement (voir commandes en bas de fichier)
+# ============================================================
+
+# --- Serveur HTTP embarqué (Tomcat) ---
+server:
+  port: 8080
+
+  # Arrêt "gracieux" : on laisse les requêtes en cours se terminer avant de s'éteindre
+  shutdown: graceful
+
+  servlet:
+    # Encodage UTF-8 explicite des requêtes/réponses HTTP
+    # (indispensable pour les accents et caractères africains)
+    encoding:
+      charset: UTF-8
+      enabled: true
+      force: true
+
+spring:
+  application:
+    name: streaming-afrique-backend
+
+  # --- Configuration des uploads multipart ---
+  # Limites fermes CÔTÉ SERVEUR : un client ne peut jamais dépasser
+  # ces tailles (appliquées avant même la logique métier).
+  servlet:
+    multipart:
+      # Taille maximale d'UN fichier dans la requête
+      max-file-size: 5MB
+      # Taille maximale de la requête entière (marge pour les métadonnées)
+      max-request-size: 10MB
+
+  # --- Résolution des paramètres de pagination/tri (?page= ?size= ?sort=) ---
+  # Taille de page plafonnée (évite qu'un client demande 10 millions de lignes).
+  data:
+    web:
+      pageable:
+        max-page-size: 100
+        default-page-size: 10
+        one-indexed-parameters: false
+
+    # --- Redis (cache, sessions, présence, compteurs, rate-limiting…) ---
+    # La connexion technique est gérée par Lettuce (inclus dans starter-data-redis).
+    # Variables d'environnement : REDIS_HOST, REDIS_PORT, REDIS_PASSWORD, REDIS_SSL.
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      timeout: 2s
+      ssl:
+        enabled: ${REDIS_SSL:false}
+
+  # --- Configuration JPA / Hibernate (commune, surchargée par profil) ---
+  # Règle "Open Session In View = false" : évite fuites de session et
+  # oblige les services à charger explicitement ce dont le DTO a besoin.
+  jpa:
+    open-in-view: false
+
+    # Le DIALECTE (PostgreSQLDialect) est DÉTECTÉ automatiquement par
+    # Hibernate 6 depuis l'URL JDBC : inutile (et risqué) de le figer.
+    #
+    # La STRATÉGIE DE NOMENCLATURE convertit automatiquement camelCase → snake_case
+    # (Category.createdAt → colonne created_at) : aucune annotation @Column
+    # n'est nécessaire pour ça, c'est le défaut de Spring Boot.
+    #
+    # ddl-auto (stratégie de création des tables) par PROFIL :
+    #   - dev  → validate (le schéma vient de FLYWAY, jamais d'Hibernate ;
+    #            toute divergence entité ↔ migration = échec au démarrage)
+    #   - prod → none    (JAMAIS de modification automatique du schéma)
+    #   - tests → create-drop (base H2 jetable, Flyway désactivé —
+    #            voir src/test/resources/application.yml)
+
+  # Délai max accordé à l'arrêt gracieux avant coupure forcée
+  lifecycle:
+    timeout-per-shutdown-phase: 20s
+
+  # --- Sérialisation JSON (Jackson) — pour toutes nos API REST ---
+  jackson:
+    # Les dates sont stockées et exposées en UTC (standard international)
+    time-zone: UTC
+    # Les champs null ne sont pas inclus → réponses plus légères
+    default-property-inclusion: non_null
+    serialization:
+      # Dates sérialisées au format ISO-8601 ("2026-09-10T18:00:00Z")
+      # plutôt qu'en timestamp numérique illisible
+      write-dates-as-timestamps: false
+
+# --- Identité métier de la plateforme ---
+# (utilisée par GET /api/health et GET /api/info — informations NON sensibles)
+app:
+  display-name: FLICK
+  description: Plateforme de streaming en direct
+  timezone: UTC
+
+  # --- CORS : origines autorisées à appeler l'API ---
+  # JAMAIS "*" en combinaison avec des credentials (voir WebConfig).
+  # Valeur par défaut pour le dev ; la production surcharge via
+  # la variable d'environnement CORS_ALLOWED_ORIGINS du serveur.
+  cors:
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173}
+
+  # --- Upload de fichiers (étape images) ---
+  storage:
+    # Dossier racine des fichiers stockés (remplaçable par S3 plus tard).
+    # En production : variable d'environnement STORAGE_LOCATION.
+    location: ${STORAGE_LOCATION:./uploads}
+    # Taille maximale d'UNE image (octets × Mo ; doublée par la limite
+    # multipart serveur ci-dessus — c'est CETTE limite métier qui parle).
+    max-image-size-mb: 5
+    # Liste blanche des types MIME autorisés — vérifiée sur le CONTENU
+    # du fichier (signature binaire), pas sur l'extension déclarée.
+    allowed-image-types: image/jpeg,image/png,image/gif,image/webp
+
+  # --- Redis : paramètres applicatifs (distincts de la connexion technique) ---
+  redis:
+    # Préfixe de toutes les clés Redis (ex. "sa:ma-cle").
+    # Évite les collisions si le même serveur Redis est partagé entre services.
+    prefix: ${REDIS_PREFIX:sa}
+    # Durée de vie par défaut d'une entrée cache (ici 10 minutes).
+    default-ttl: ${REDIS_DEFAULT_TTL:10m}
+
+    # TTL par type de donnée (surchargeables par variables d'environnement).
+    # La base de données reste la source de vérité : le cache accélère
+    # les lectures en fréquence (invalidé sur écriture).
+    categories-ttl: ${REDIS_CATEGORIES_TTL:15m}
+    creators-ttl: ${REDIS_CREATORS_TTL:5m}
+    stats-ttl: ${REDIS_STATS_TTL:20s}
+    lists-ttl: ${REDIS_LISTS_TTL:5m}
+
+  # --- Anti-abus / rate limiting (étape 6.27) ---
+  # UNE limite par famille de routes (jamais une limite unique globale).
+  # Compteurs Redis à fenêtre fixe (globaux à toutes les instances) avec
+  # repli mémoire si Redis est indisponible. Dépassement → HTTP 429 +
+  # en-tête Retry-After. Valeurs par défaut généreuses (dev/tests) ;
+  # la production les resserre via variables d'environnement.
+  rate-limit:
+    enabled: ${RATE_LIMIT_ENABLED:true}
+    # SEC-005 : confiance envers X-Forwarded-For pour l'IP cliente.
+    # true (défaut) = derrière un reverse proxy de confiance qui POSE cet
+    # en-tête (ou tests). false = exposition DIRECTE : seule l'adresse TCP
+    # réelle est utilisée (un client forgeant l'en-tête contournerait les
+    # buckets par IP). Surchage : RATE_LIMIT_TRUST_PROXY.
+    trust-proxy: ${RATE_LIMIT_TRUST_PROXY:true}
+    login:
+      requests: ${RATE_LIMIT_LOGIN_REQUESTS:30}
+      window: ${RATE_LIMIT_LOGIN_WINDOW:1m}
+    register:
+      requests: ${RATE_LIMIT_REGISTER_REQUESTS:20}
+      window: ${RATE_LIMIT_REGISTER_WINDOW:1m}
+    search:
+      requests: ${RATE_LIMIT_SEARCH_REQUESTS:300}
+      window: ${RATE_LIMIT_SEARCH_WINDOW:1m}
+    messages:
+      requests: ${RATE_LIMIT_MESSAGES_REQUESTS:120}
+      window: ${RATE_LIMIT_MESSAGES_WINDOW:1m}
+    public-bucket:
+      requests: ${RATE_LIMIT_PUBLIC_REQUESTS:600}
+      window: ${RATE_LIMIT_PUBLIC_WINDOW:1m}
+    default-bucket:
+      requests: ${RATE_LIMIT_DEFAULT_REQUESTS:1000}
+      window: ${RATE_LIMIT_DEFAULT_WINDOW:1m}
+
+  # --- Bêta privée (étape 24) ---
+  # invite-only=false par défaut (comportement inchangé) ; l'environnement
+  # bêta/staging l'active (BETA_INVITE_ONLY=true) : toute inscription exige
+  # alors un code d'invitation valide lié à l'email (403 sinon).
+  beta:
+    invite-only: ${BETA_INVITE_ONLY:false}
+    invitation-ttl: ${BETA_INVITATION_TTL:14d}
+
+  # --- Paiements (étape 14 : pont argent réel → coins) ---  # Sandbox : prestataires RÉELS remplacés par le simulé tant qu'aucune
+  # intégration officielle (doc, sandbox, webhooks, signature) n'est câblée.
+  # Le secret HMAC des webhooks vient de l'environnement (JAMAIS de Git) ;
+  # sans secret, TOUT webhook est rejeté (aucun crédit possible).
+  payments:
+    # true = dev/test (simulé) ; prod = false + implémentations réelles.
+    sandbox-enabled: ${PAYMENTS_SANDBOX_ENABLED:true}
+    # HMAC-SHA256 des signatures webhook (en-tête X-Webhook-Signature).
+    webhook-secret: ${PAYMENT_WEBHOOK_SECRET:}
+    # Âge maximal d'un paiement non confirmé avant EXPIRED (jamais crédité).
+    expiry-after: ${PAYMENTS_EXPIRY_AFTER:30m}
+    # Cadence du balayage d'expiration (ms).
+    expiry-check-interval-ms: ${PAYMENTS_EXPIRY_CHECK_INTERVAL_MS:300000}
+    # Interrupteur du scheduler (tests à la main quand false).
+    expiry-enabled: ${PAYMENTS_EXPIRY_ENABLED:true}
+
+  # --- Vidéos VOD (étape 15 : replay auto, vues, lecture) ---
+  # Téléversement validé (MP4/WebM sniffés, taille bornée), vues anti-abus
+  # (un viewer = une vue par fenêtre), FFmpeg DÉSACTIVÉ sans binaire vérifié
+  # (durée déclarée/étendue live, miniature fournie — jamais devinées).
+  video:
+    max-upload-mb: ${VIDEO_MAX_UPLOAD_MB:512}
+    allowed-types: ${VIDEO_ALLOWED_TYPES:video/mp4,video/webm}
+    view-window: ${VIDEO_VIEW_WINDOW:1h}
+    ffmpeg-enabled: ${VIDEO_FFMPEG_ENABLED:false}
+    # Rejeu au boot des traitements orphelins (crash/redéploiement).
+    recovery-enabled: ${VIDEO_RECOVERY_ENABLED:true}
+
+  # --- Clips (étape 15 : extraits bornés, auteur tracé) ---
+  # Durée d'extrait dans [min, max] (validée SERVEUR contre la source).
+  clips:
+    min-duration-seconds: ${CLIP_MIN_DURATION:3}
+    max-duration-seconds: ${CLIP_MAX_DURATION:60}
+    view-window: ${CLIP_VIEW_WINDOW:1h}
+
+  # --- Intelligence artificielle (étape 18 : abstraction multi-provider) ---
+  # React → backend → AIService → AIProvider → modèle. JAMAIS de clé
+  # dans le frontend, JAMAIS d'appel direct navigateur → fournisseur.
+  #   AI_PROVIDER  stub (défaut : local, 0 coût) | http (OpenAI-compatible)
+  #   AI_API_KEY   clé du fournisseur distant (JAMAIS versionnée)
+  #   AI_MODEL     nom du modèle (traçabilité usage)
+  #   AI_BASE_URL  base http (ex. https://api.openai.com/v1 ou http://ollama:11434/v1)
+  ai:
+    enabled: ${AI_ENABLED:true}
+    provider: ${AI_PROVIDER:stub}
+    model: ${AI_MODEL:flick-stub-1}
+    base-url: ${AI_BASE_URL:}
+    api-key: ${AI_API_KEY:}
+    timeout: ${AI_TIMEOUT:20s}
+    max-prompt-chars: ${AI_MAX_PROMPT_CHARS:2000}
+    max-output-tokens: ${AI_MAX_OUTPUT_TOKENS:500}
+    daily-quota-user: ${AI_DAILY_QUOTA_USER:30}
+    daily-quota-creator: ${AI_DAILY_QUOTA_CREATOR:100}
+    daily-quota-staff: ${AI_DAILY_QUOTA_STAFF:300}
+    rate-limit-creator-per-minute: ${AI_RATE_LIMIT_CREATOR_PER_MINUTE:10}
+    rate-limit-user-per-minute: ${AI_RATE_LIMIT_USER_PER_MINUTE:10}
+    cache-ttl: ${AI_CACHE_TTL:30m}
+
+  # --- Livestreaming (étape 10) ---
+  # Spring orchestre un serveur média externe (SRS en dev) : RTMP ingest,
+  # HLS, hooks HTTP. Aucun flux vidéo ne transite par ce backend.
+  streaming:
+    # URL RTMP vue depuis le poste du créateur (OBS → serveur média).
+    rtmp-url: ${RTMP_INGEST_URL:rtmp://localhost:1935/live}
+    # Base HTTP publique de lecture HLS ({base}/live/{streamId}.m3u8).
+    hls-base-url: ${HLS_BASE_URL:http://localhost:18080}
+    # Secret partagé des callbacks ingest (?secret=…) — DEV-ONLY, prod via env.
+    ingest-secret: ${INGEST_CALLBACK_SECRET:dev-only-ingest-changeme}
+    # API du serveur média (réconciliateur anti-LIVE-fantôme, réseau interne).
+    srs-api-url: ${SRS_API_URL:http://srs:1985/api/v1}
+    # Entropie des stream keys (octets, SecureRandom).
+    key-bytes: ${STREAM_KEY_BYTES:32}
+    # Marqueur de visionnage : TTL sans heartbeat (le frontend pulse ~30s).
+    viewer-ttl: ${VIEWER_TTL:90s}
+    # Concurrence : directs LIVE simultanés max par chaîne.
+    max-live-per-creator: ${MAX_STREAMS_PER_CREATOR:1}
+    # Réconciliateur : termine les LIVE orphelins (serveur média muet).
+    reconciler-enabled: ${STREAM_RECONCILER_ENABLED:true}
+    reconciler-interval-ms: ${STREAM_RECONCILER_INTERVAL_MS:60000}
+    stale-after: ${STREAM_STALE_AFTER:5m}
+
+  # --- Présence utilisateur (temps réel) ---
+  # Marqueur vivant dans Redis (TTL) : aucune présence n'est définitive.
+  # Le heartbeat prolonge les marqueurs des sessions actives, le sweep nettoie
+  # ceux des clients disparus sans déconnexion propre et diffuse leur passage
+  # OFFLINE sur /topic/presence.
+  presence:
+    # Durée de vie d'un marqueur sans activité — les clients actifs sont
+    # rafraîchis à chaque heartbeat (heartbeatIntervalMs).
+    ttl: ${PRESENCE_TTL:2m}
+    # Fréquence (ms) du heartbeat qui prolonge les marqueurs des sessions actives.
+    heartbeat-interval-ms: ${PRESENCE_HEARTBEAT_INTERVAL_MS:30000}
+    # Fréquence (ms) du nettoyage (sweep) des présences obsolètes.
+    sweep-interval-ms: ${PRESENCE_SWEEP_INTERVAL_MS:60000}
+    # Active/désactive les tâches planifiées (désactivé dans les tests qui pilotent la présence à la main).
+    enabled: ${PRESENCE_ENABLED:true}
+
+  # --- WebSocket : temps réel (chat, présence, notifications, stream, compteurs) ---
+  # STOMP au-dessus de WebSocket : la messagerie applicative (topics /topic/...,
+  # requêtes /app/...) est déjà prête pour les futures fonctionnalités.
+  websocket:
+    # Chemin du point d'accès de la poignée de main WebSocket.
+    path: ${WS_PATH:/ws}
+    # Origines autorisées pour la poignée de main : par défaut, les MÊMES
+    # que CORS REST (un seul réglage à faire en prod via CORS_ALLOWED_ORIGINS ;
+    # WS_ALLOWED_ORIGINS ne sert qu'à diverger ponctuellement).
+    allowed-origins: ${WS_ALLOWED_ORIGINS:${CORS_ALLOWED_ORIGINS:http://localhost:5173}}
+    # Période du "pulse" de démonstration diffusé sur /topic/pulse (ms).
+    # Longue en dev (0,1 requête), courte dans les tests pour les accélérer.
+    demo-pulse-interval-ms: ${WS_DEMO_PULSE_INTERVAL_MS:5000}
+
+  # --- Événements temps réel (architecture 6.22) ---
+  # Catalogue préparé : STREAM_STARTED/ENDED, VIEWER_JOINED/LEFT, CHAT_MESSAGE,
+  # FOLLOW_CREATED, NOTIFICATION_CREATED. Chaque événement est diffusé sur
+  # {baseTopic}/{slug} (ex. /topic/events/chat-message) et distribué aux
+  # traitants StreamEventHandler (broadcast WS + journalisation).
+  stream-events:
+    # Active la diffusion WebSocket (les traitants internes restent actifs sinon).
+    enabled: ${STREAM_EVENTS_ENABLED:true}
+    # Racine des topics d'un type d'événement.
+    base-topic: ${STREAM_EVENTS_BASE_TOPIC:/topic/events}
+    # Émettre un événement FICTIF (CHAT_MESSAGE) en boucle : démo, pas un chat.
+    demo-enabled: ${STREAM_EVENTS_DEMO_ENABLED:false}
+    # Période de l'événement fictif (ms).
+    demo-interval-ms: ${STREAM_EVENTS_DEMO_INTERVAL_MS:15000}
+    # Direct et auteur fictifs de l'événement de démonstration.
+    demo-stream-id: ${STREAM_EVENTS_DEMO_STREAM_ID:1}
+    demo-author-id: ${STREAM_EVENTS_DEMO_AUTHOR_ID:1}
+
+# --- JWT (étape 6.24 : authentification par jeton) ---
+  # Configuration SÉCURISÉE : la clé de signature (JWT_SECRET) provient de
+  # l'environnement, JAMAIS de Git — aucun secret n'est versionné.
+  # Si JWT_SECRET est absent, une clé éphémère aléatoire est générée au
+  # démarrage (les jetons ne survivent pas au redémarrage, avertissement logué).
+  #   JWT_SECRET            → clé HMAC-SHA256 (idéalement ≥ 32 octets)
+  #   JWT_ACCESS_TOKEN_TTL  → durée de vie d'un token d'accès  (défaut 15m)
+  #   JWT_REFRESH_TOKEN_TTL → durée de vie du refresh token PRÉVU (défaut 7d)
+  #   JWT_ISSUER            → émetteur attendu (claim "iss")
+  security:
+    jwt:
+      secret: ${JWT_SECRET:}
+      access-token-ttl: ${JWT_ACCESS_TOKEN_TTL:15m}
+      refresh-token-ttl: ${JWT_REFRESH_TOKEN_TTL:7d}
+      issuer: ${JWT_ISSUER:streaming-afrique-backend}
+
+  # --- Google (connexion "Continuer avec Google", flux ID token OIDC) ---
+  # Le Client ID est PUBLIC par nature (visible dans le frontend et la
+  # console Google) : il sert d'audience attendue de l'id_token, ce n'est
+  # PAS un secret. AUCUN Client Secret dans ce flux (aucun échange
+  # code/token serveur) : GOOGLE_CLIENT_SECRET et GOOGLE_REDIRECT_URI sont
+  # donc VOLONTAIREMENT absents — ne pas les créer.
+  #   GOOGLE_CLIENT_ID → Client ID OAuth du projet Google Cloud (vide = désactivé)
+  google:
+    client-id: ${GOOGLE_CLIENT_ID:}
+
+# --- Monitoring Spring Boot Actuator (étape 6.28) ---
+# Socle commun : chemins et endpoints exposés. Les PROFILS resserrent
+# (prod : health+info, sans détails) ou élargissent (dev : + metrics,
+# détails visibles). La PROTECTION (public vs authentifié) vit dans
+# SecurityConfig : health/info publics (sondes), le reste authentifié.
+management:
+  endpoints:
+    web:
+      base-path: /actuator
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      # Sondes Kubernetes : /actuator/health/liveness et /readiness
+      probes:
+        enabled: true
+      show-details: never
+      show-components: never
+
+# --- Métadonnées applicatives (exposées par /actuator/info, NON sensibles) ---
+info:
+  app:
+    name: FLICK
+    description: Plateforme de streaming en direct
+
+# --- Journalisation (Logback) ---
+logging:
+  charset:
+    console: UTF-8
+  # Motif : date/heure · thread · niveau · classe · message
+  pattern:
+    console: "%d{yyyy-MM-dd'T'HH:mm:ss.SSSXXX} [%thread] %-5level %logger{36} - %msg%n"
+  level:
+    root: INFO
+
+# ============================================================
+# COMMENT LANCER (depuis le dossier backend/) :
+#
+#   Développement :
+#     mvn spring-boot:run -Dspring-boot.run.profiles=dev
+#     # ou avec variable d'environnement :
+#     SPRING_PROFILES_ACTIVE=dev mvn spring-boot:run
+#
+#   Production (jar une fois construit) :
+#     java -jar target/backend-0.0.1-SNAPSHOT.jar --spring.profiles.active=prod
+#
+#   Vérifier le profil actif dans les logs au démarrage :
+#     "The following 1 profile is active: \"dev\""
+# ============================================================

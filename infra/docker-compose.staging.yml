@@ -1,0 +1,42 @@
+# ============================================================
+# FLICK — surcharge STAGING (recette quasi-prod)
+# Usage :
+#   docker compose -f docker-compose.prod.yml \
+#                  -f docker-compose.staging.yml up -d --build
+#
+# Mêmes images et mêmes réseaux que la prod ; seules changent :
+# tags, exposition locale (pas de 80/443/1935 publics : tout en
+# localhost), volumes éphémères et secrets de RECETTE (forts mais
+# distincts de la prod — jamais les mêmes valeurs).
+# Paiements : sandbox ACTIF en staging (pas de facturation réelle).
+# ============================================================
+
+services:
+  proxy:
+    ports:
+      - "127.0.0.1:8080:80"
+      - "127.0.0.1:8443:443"
+
+  frontend:
+    build:
+      args:
+        VITE_API_URL: ${VITE_API_URL:-https://localhost:8443/api}
+    image: flick-frontend:staging
+
+  backend:
+    image: flick-backend:staging
+    environment:
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-https://localhost:8443}
+      PAYMENTS_SANDBOX_ENABLED: "true"
+      RTMP_INGEST_URL: ${RTMP_INGEST_URL:-rtmp://localhost:1936/live}
+      HLS_BASE_URL: ${HLS_BASE_URL:-https://localhost:8443/hls}
+      JAVA_TOOL_OPTIONS: ${JAVA_TOOL_OPTIONS:--Xms128m -Xmx512m}
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 768M
+
+  srs:
+    ports:
+      - "127.0.0.1:1936:1935"

@@ -1,0 +1,139 @@
+# ============================================================
+# PROFIL : development
+# Usage : votre poste de travail uniquement
+#
+# Activation :
+#   DB_PASSWORD=xxx JWT_SECRET=une-cle-au-moins-32-octets-longue mvn spring-boot:run -Dspring-boot.run.profiles=dev
+# ============================================================
+
+server:
+  port: 8080
+
+  # En développement : les erreurs HTTP renvoient le message et la pile d'exécution
+  # (le bug se voit directement dans Postman/l'interface)
+  error:
+    include-message: always
+    include-stacktrace: always
+
+# CORS EN DÉVELOPPEMENT : uniquement le serveur Vite local par défaut
+# (http://localhost:5173 = port par défaut de Vite).
+# Surcharge ponctuelle possible sans toucher ce fichier :
+#   CORS_ALLOWED_ORIGINS=http://192.168.1.20:5173 mvn spring-boot:run ...
+app:
+  cors:
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173,http://127.0.0.1:5173}
+
+  # Seed des données de RÉFÉRENCE au boot (7.25 : 12 catégories + 3 paramètres,
+  # idempotent, rejouable). DEV uniquement — prod=false explicite, tests=false
+  # par défaut (le bean n'existe pas sans cette propriété à true).
+  seed:
+    reference-data: true
+
+  # Google (connexion "Continuer avec Google") : Client ID PUBLIC par nature
+  # (audience attendue de l'id_token, visible dans le frontend — pas un secret).
+  # Défaut dev = Client ID FLICK, surchargeable via GOOGLE_CLIENT_ID.
+  google:
+    client-id: ${GOOGLE_CLIENT_ID:465175507754-hli0c7t5d876elogv4h2a1t0c5dm0vld.apps.googleusercontent.com}
+
+  # Paiements (étape 14) : sandbox ACTIF en dev (prestataires simulés).
+  # DEV-ONLY (faible, local uniquement, surchargeable via PAYMENT_WEBHOOK_SECRET).
+  payments:
+    sandbox-enabled: true
+    webhook-secret: ${PAYMENT_WEBHOOK_SECRET:dev-webhook-secret-local-only}
+
+spring:
+  # ------------------------------------------------------------
+  # PostgreSQL (développement local via Docker ou instance locale).
+  #
+  # Les secrets (DB_PASSWORD) proviennent de l'ENVIRONNEMENT, jamais de Git.
+  # Valeurs par défaut = uniquement le local (hors mot de passe, requis !).
+  #
+  #   DB_HOST     → localhost
+  #   DB_PORT     → 5432
+  #   DB_NAME     → streaming_afrique
+  #   DB_USERNAME → streaming
+  #   DB_PASSWORD → (obligatoire, fourni au lancement)
+  #
+#   Lancement : DB_PASSWORD=xxx mvn spring-boot:run -Dspring-boot.run.profiles=dev
+# ------------------------------------------------------------
+
+  # ------------------------------------------------------------
+  # JWT (étape 6.24) : la clé vient de l'environnement (JWT_SECRET),
+  # jamais de Git. Lancer avec, par exemple :
+  #
+  #   DB_PASSWORD=xxx JWT_SECRET=dev-cle-32-octets-minimum-ok mvn spring-boot:run -Dspring-boot.run.profiles=dev
+  #
+  # Sans JWT_SECRET, une clé aléatoire éphémère est générée au démarrage :
+  # les jetons deviennent invalides à chaque redémarrage.
+  # ------------------------------------------------------------
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:streaming_afrique}
+    username: ${DB_USERNAME:streaming}
+    password: ${DB_PASSWORD}
+    driver-class-name: org.postgresql.Driver
+    # Pool de connexions (HikariCP) : valeurs raisonnables en dev
+    hikari:
+      maximum-pool-size: 5
+      minimum-idle: 2
+      connection-timeout: 30000
+
+  jpa:
+    hibernate:
+      # En dev : Hibernate VALIDE le schéma issu de FLYWAY (7.24).
+      # Plus aucun "update" automatique : toute évolution = nouvelle migration
+      # V16, V17… Les données existantes sont conservées par les migrations.
+      # (create-drop est réservé aux TESTS sur H2.)
+      ddl-auto: validate
+    show-sql: true
+    properties:
+      hibernate:
+        # SQL multi-lignes et indenté dans les logs → lisible à l'œil
+        format_sql: true
+
+  # ------------------------------------------------------------
+  # Flyway (7.24) : migrations db/migration/V1__...V15__ appliquées dans
+  # l'ordre au démarrage. baseline-on-migrate = true : une base dev créée
+  # AVANT Flyway (via l'ancien ddl-auto:update) est marquée "baselined"
+  # sans rejouer les migrations — SANS la détruire. Base neuve : les 15
+  # migrations tournent dans l'ordre (reproductible, déterministe).
+  # ------------------------------------------------------------
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
+
+  jackson:
+    serialization:
+      # JSON indenté — lisible à l'œil dans le navigateur/Postman
+      indent-output: true
+
+# ------------------------------------------------------------
+# Redis (développement local via Docker).
+# Le serveur Redis n'est PAS inclus dans le projet ; à démarrer une fois :
+#
+#   docker run -d --name streaming-redis -p 6379:6379 redis:7-alpine
+#
+# Variables d'environnement (valeurs par défaut = du local) :
+#   REDIS_HOST     → localhost
+#   REDIS_PORT     → 6379
+#   REDIS_PASSWORD → (vide en dev)
+#   REDIS_PREFIX   → sa
+#   REDIS_DEFAULT_TTL → 10m
+#
+# Lancement : DB_PASSWORD=xxx mvn spring-boot:run -Dspring-boot.run.profiles=dev
+# ------------------------------------------------------------
+
+# --- Journalisation en développement ---
+logging:
+  level:
+    # Nos classes en DEBUG : on voit le détail interne pendant qu'on code
+    # (JAMAIS de mot de passe / token / secret : voir règle 6.28)
+    com.streamingafrique: DEBUG
+    # Spring Web en INFO : on voit arriver les requêtes HTTP
+    org.springframework.web: INFO
+
+# --- Monitoring en développement : détails visibles (poste local uniquement) ---
+management:
+  endpoint:
+    health:
+      show-details: always
+      show-components: always

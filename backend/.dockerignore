@@ -1,0 +1,30 @@
+# Contexte envoyé au démon Docker pour `docker build ./backend`.
+# Tout ce qui est listé ici ne part JAMAIS dans l'image
+# (poids, secrets accidentels, invalidations de cache inutiles).
+
+# Compilation locale (reconstruite dans l'étape "build" du Dockerfile)
+target/
+*.class
+
+# Données et journaux locaux (montés en volumes à l'exécution)
+logs/
+uploads/
+*.log
+
+# Secrets et configuration personnelle (ne doivent JAMAIS voyager)
+.env
+.env.*
+application-local.yml
+
+# Fichiers Docker eux-mêmes : ils pilotent le build,
+# inutile de les copier dans le contexte
+Dockerfile
+.dockerignore
+docker-compose.yml
+
+# IDE et système (bruit local)
+.idea/
+*.iml
+.vscode/
+.DS_Store
+Thumbs.db

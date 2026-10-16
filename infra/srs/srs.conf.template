@@ -1,0 +1,43 @@
+# ============================================================
+# FLICK — serveur média SRS 5 (MODÈLE, secret injecté au déploiement)
+#
+# Génération sur le serveur (secret jamais dans Git) :
+#   INGEST_CALLBACK_SECRET=... envsubst < srs.conf.template > srs.conf
+# (voir docs/infrastructure/DEPLOY.md)
+#
+# Rôles : RTMP ingest (OBS) → HLS (lecteurs) ; AUCUNE décision métier —
+# l'autorisation vit dans le backend (hook on_publish → /api/ingest).
+# Enregistrements DVR désactivés : la VOD naît du pipeline backend
+# (upload + FFmpeg), pas du serveur média.
+# ============================================================
+
+listen 1935;
+max_connections 1000;
+daemon off;
+srs_log_tank console;
+
+http_server {
+    enabled on;
+    listen 18080;
+    dir ./objs/nginx/html;
+}
+
+# API interne SRS (réconciliateur backend) — jamais exposée publiquement.
+http_api {
+    enabled on;
+    listen 1985;
+}
+
+vhost __defaultVhost__ {
+    hls {
+        enabled on;
+        # Segments courts : latence contenue, zapping Africa+ fluide.
+        hls_fragment 4;
+        hls_window 60;
+    }
+    http_hooks {
+        enabled on;
+        # Refuse toute publication sans validation backend (401/403/404 = cut).
+        on_publish http://backend:8080/api/ingest/on-publish?secret=${INGEST_CALLBACK_SECRET};
+    }
+}

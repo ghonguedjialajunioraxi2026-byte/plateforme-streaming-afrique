@@ -1,0 +1,36 @@
+# ============================================================
+# Racine du dépôt — gitignore global
+# ============================================================
+
+# Secrets et configuration locale (JAMAIS dans Git)
+.env
+.env.*
+!**/.env.example
+application-local.yml
+application-*.local.yml
+
+# Logs et données locales
+logs/
+*.log
+uploads/
+media/
+backend/logs/
+backend/uploads/
+backend/target/
+frontend-web/dist/
+frontend-web/node_modules/
+
+# IDE et système
+.idea/
+*.iml
+.vscode/
+!.vscode/extensions.json
+.DS_Store
+Thumbs.db
+*.swp
+*~
+
+# Dépendances et build
+backend/target/
+frontend-web/node_modules/
+frontend-web/dist/

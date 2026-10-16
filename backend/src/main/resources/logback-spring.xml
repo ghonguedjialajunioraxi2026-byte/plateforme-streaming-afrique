@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+    Journalisation (étape 6.28) — format par environnement, niveaux par profil.
+    Les NIVEAUX (DEBUG/INFO/WARN/ERROR) vivent dans application-dev/prod.yml ;
+    ce fichier ne règle que le FORMAT et la DESTINATION :
+      - hors prod (dev local, tests) : console lisible, une ligne par événement,
+        avec l'identifiant de requête [req=...] issu du MDC (RequestIdFilter) ;
+      - prod : console en JSON STRUCTURÉ (un objet par ligne, MDC inclus,
+        directement aspirable par un collecteur) + fichier tournant
+        logs/backend.log (30 jours, 100 Mo max).
+
+    Règle d'or (jamais de secret dans les logs) : AUCUN pattern n'imprime un
+    corps de requête, un en-tête Authorization, un mot de passe ou un token —
+    seuls le niveau, la classe, le message métier et l'identifiant de requête
+    sont journalisés. Les messages d'erreur renvoyés au client ne contiennent
+    jamais de pile d'exécution (voir GlobalExceptionHandler).
+-->
+<configuration>
+
+    <springProperty name="APP_NAME" source="spring.application.name" defaultValue="streaming-afrique-backend"/>
+    <springProperty name="LOG_FILE" source="logging.file.name" defaultValue="logs/backend.log"/>
+
+    <!-- ─── Développement / tests : console lisible ─── -->
+    <springProfile name="!prod">
+        <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+            <encoder>
+                <pattern>%d{HH:mm:ss.SSS} [%thread] %highlight(%-5level) %cyan(%logger{36}) [req=%X{requestId:-}] - %msg%n</pattern>
+                <charset>UTF-8</charset>
+            </encoder>
+        </appender>
+
+        <root level="INFO">
+            <appender-ref ref="CONSOLE"/>
+        </root>
+    </springProfile>
+
+    <!-- ─── Production : console JSON + fichier tournant ─── -->
+    <springProfile name="prod">
+        <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+            <encoder class="net.logstash.logback.encoder.LogstashEncoder">
+                <customFields>{"service":"${APP_NAME}"}</customFields>
+                <includeMdcKeyName>requestId</includeMdcKeyName>
+                <charset>UTF-8</charset>
+            </encoder>
+        </appender>
+
+        <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+            <file>${LOG_FILE}</file>
+            <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+                <fileNamePattern>${LOG_FILE}.%d{yyyy-MM-dd}.%i.gz</fileNamePattern>
+                <maxFileSize>100MB</maxFileSize>
+                <maxHistory>30</maxHistory>
+                <totalSizeCap>3GB</totalSizeCap>
+            </rollingPolicy>
+            <encoder class="net.logstash.logback.encoder.LogstashEncoder">
+                <customFields>{"service":"${APP_NAME}"}</customFields>
+                <includeMdcKeyName>requestId</includeMdcKeyName>
+                <charset>UTF-8</charset>
+            </encoder>
+        </appender>
+
+        <root level="INFO">
+            <appender-ref ref="CONSOLE"/>
+            <appender-ref ref="FILE"/>
+        </root>
+    </springProfile>
+
+</configuration>

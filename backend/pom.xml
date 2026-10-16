@@ -1,0 +1,302 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <!--
+        Spring Boot Starter Parent :
+        fournit les versions compatibles de toutes les dépendances Spring Boot.
+        On n'indique plus de versions pour starter-web / starter-test.
+    -->
+    <parent>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-parent</artifactId>
+        <version>3.4.13</version>
+        <relativePath/>
+    </parent>
+
+    <!-- Identité du projet -->
+    <groupId>com.streamingafrique</groupId>
+    <artifactId>backend</artifactId>
+    <version>0.0.1-SNAPSHOT</version>
+    <name>streaming-afrique-backend</name>
+    <description>Backend de la plateforme africaine de livestreaming</description>
+
+    <properties>
+        <!-- Langue du code : Java 17 (obligatoire pour Spring Boot 3) -->
+        <java.version>17</java.version>
+        <!-- Encodage des sources -->
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    </properties>
+
+    <dependencies>
+        <!--
+            Spring Web : permet de créer une API REST et embarque
+            le serveur HTTP Tomcat (par défaut).
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+
+        <!--
+            Validation : active les annotations (@Valid, @NotBlank, @Email...)
+            sur les DTO d'entrée. Utilisée dès la première ressource métier.
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-validation</artifactId>
+        </dependency>
+
+        <!--
+            Spring Data JPA + Hibernate :
+            la couche Repository (accès base de données) repose dessus.
+            → toutes les entités @Entity sont persistées de façon déclarative.
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-jpa</artifactId>
+        </dependency>
+
+        <!--
+            Pilote JDBC PostgreSQL : les profils dev/prod se connectent à
+            PostgreSQL via jdbc:postgresql://... (scope runtime = dans le jar).
+        -->
+        <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+
+        <!--
+            H2 = base EN MÉMOIRE utilisée UNIQUEMENT par les tests
+            automatiques (aucun serveur requis en CI). En production/dev
+            réel c'est PostgreSQL qui est utilisé. Scope test = absent du jar.
+        -->
+        <dependency>
+            <groupId>com.h2database</groupId>
+            <artifactId>h2</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <!--
+            Flyway (sous-étape 7.24) : migrations SQL versionnées pour
+            PostgreSQL (dev + prod). Choisi plutôt que Liquibase : SQL pur,
+            fichiers V1__...V15__ déterministes, zéro abstraction XML/YAML —
+            notre cible est 100 % PostgreSQL. Versions gérées par le parent
+            Spring Boot. Désactivé en tests (H2 + Hibernate create-drop,
+            voir src/test/resources/application.yml).
+            Flyway 10+ : support PostgreSQL dans l'artefact dédié.
+        -->
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-core</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-database-postgresql</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+
+        <!--
+            Starter de test (JUnit 5, Spring Test...) :
+            sera utilisé dès qu'on écrira nos premiers tests.
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <!--
+            Redis : cache, sessions éventuelles, présence, données temporaires,
+            compteurs, rate-limiting, fonctionnalités temps réel.
+            Inclut le client Lettuce (non bloquant).
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-redis</artifactId>
+        </dependency>
+
+        <!--
+            Testcontainers : démarre un conteneur Redis éphémère pour les tests
+            d'intégration (aucun serveur Redis local requis en CI/dev).
+            Désactivé automatiquement si Docker n'est pas disponible.
+        -->
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <!--
+            WebSocket : temps réel (chat live, présence, notifications,
+            événements de stream, compteurs). Embarque spring-websocket et
+            spring-messaging (protocole STOMP pour les prochaines fonctionnalités).
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-websocket</artifactId>
+        </dependency>
+
+        <!--
+            Spring Security : authentification et autorisation.
+            Socle 6.23 : filter chain, rôles/authorities, Basic auth (sans JWT).
+            Active la protection par défaut : toutes les routes /api/... sont
+            bloquées SAUF la liste blanche explicite (health/info, contenu public,
+            inscription, handshake WebSocket). Durcissement progressif ensuite.
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-security</artifactId>
+        </dependency>
+
+        <!--
+            Actuator (étape 6.28 : observabilité) : endpoints de monitoring
+            /actuator/health (liveness/readiness), /actuator/info,
+            /actuator/metrics. Exposition et protection par profil
+            (voir application*.yml + SecurityConfig).
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+
+        <!--
+            Registre Micrometer Prometheus (étape 23 : monitoring) : expose
+            /actuator/prometheus (JVM, HTTP server requests, cache…) au format
+            OpenMetrics pour Prometheus. Lecture seule, réseau interne
+            uniquement (jamais routé par le reverse proxy public).
+        -->
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-registry-prometheus</artifactId>
+        </dependency>
+
+        <!--
+            Encodeur JSON Logback (étape 6.28) : logs STRUCTURÉS en production
+            (un objet JSON par ligne : timestamp, level, logger, message,
+            requestId MDC…), directement exploitables par un collecteur.
+        -->
+        <dependency>
+            <groupId>net.logstash.logback</groupId>
+            <artifactId>logstash-logback-encoder</artifactId>
+            <version>8.0</version>
+        </dependency>
+
+        <!--
+            JJWT (Java JWT) : création, validation et parsing des jetons JWT
+            signés HMAC-SHA256 (HS256). C'est la brique du socle 6.24 :
+            token d'accès (client API) + architecture compatible refresh token.
+            jjwt-jackson branche Jackson pour la sérialisation des claims.
+        -->
+        <dependency>
+            <groupId>io.jsonwebtoken</groupId>
+            <artifactId>jjwt-api</artifactId>
+            <version>0.12.6</version>
+        </dependency>
+        <dependency>
+            <groupId>io.jsonwebtoken</groupId>
+            <artifactId>jjwt-impl</artifactId>
+            <version>0.12.6</version>
+            <scope>runtime</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.jsonwebtoken</groupId>
+            <artifactId>jjwt-jackson</artifactId>
+            <version>0.12.6</version>
+            <scope>runtime</scope>
+        </dependency>
+
+        <!--
+            Google API Client (connexion "Continuer avec Google", flux ID token
+            OIDC) : vérifie la signature RSA (certificats Google), l'émetteur
+            (iss = accounts.google.com), l'audience (GOOGLE_CLIENT_ID) et
+            l'expiration de l'id_token remis par Google Identity Services.
+            google-http-client-gson fournit la fabrique JSON exigée par le
+            vérifieur. AUCUN secret Google requis : ce flux ne fait aucun
+            échange code/token côté serveur (le secret ne transite jamais).
+            N'introduit PAS Spring Boot (déjà le socle) ni de framework lourd.
+        -->
+        <dependency>
+            <groupId>com.google.api-client</groupId>
+            <artifactId>google-api-client</artifactId>
+            <version>2.9.1</version>
+        </dependency>
+        <dependency>
+            <groupId>com.google.http-client</groupId>
+            <artifactId>google-http-client-gson</artifactId>
+            <version>2.2.0</version>
+        </dependency>
+
+        <!--
+            springdoc-openapi (étape 6.30) : documentation OpenAPI 3 + interface
+            Swagger UI générées depuis le code (annotations @Tag/@Operation/…) :
+              - JSON OpenAPI : GET /v3/api-docs
+              - Interface web : GET /swagger-ui.html (ou /swagger-ui/index.html)
+            Version 2.8.x = ligne compatible Spring Boot 3 (la ligne 3.x vise
+            Spring Boot 4). Aucune configuration XML : tout vit dans OpenApiConfig.
+        -->
+        <dependency>
+            <groupId>org.springdoc</groupId>
+            <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
+            <version>2.8.17</version>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <!--
+                Plugin Spring Boot :
+                - mvn spring-boot:run  → démarre l'application
+                - mvn package         → crée le jar exécutable dans target/
+            -->
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+                <executions>
+                    <!--
+                        Goal "build-info" : génère META-INF/build-info.properties
+                        (version, date de build). L'endpoint GET /api/info l'expose.
+                    -->
+                    <execution>
+                        <goals>
+                            <goal>build-info</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <!--
+                Surefire : exécution des tests.
+                "api.version" = version de l'API Docker utilisée par Testcontainers.
+                Obligatoire avec les moteurs Docker récents (Docker 29+) qui
+                refusent les clients d'API < 1.40 (défaut docker-java = 1.32).
+                → sans cela les tests Testcontainers sont simplement ignorés.
+            -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <systemPropertyVariables>
+                        <api.version>1.40</api.version>
+                        <!--
+                            Flyway DÉSACTIVÉ en tests (7.24) : les migrations SQL
+                            sont 100 % PostgreSQL (identity, timestamptz, checks)
+                            et ne tournent PAS sur H2. Les tests gardent Hibernate
+                            create-drop (défaut Boot sur base embarquée).
+                            Propriété SYSTÈME (prioritaire sur application.yml,
+                            limitée à la JVM forkée des tests) : PAS de
+                            src/test/resources/application.yml, car ce fichier
+                            MASQUERAIT src/main/resources/application.yml
+                            (même emplacement classpath:/ → une seule ressource
+                            chargée, app.* perdus).
+                        -->
+                        <spring.flyway.enabled>false</spring.flyway.enabled>
+                    </systemPropertyVariables>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+</project>

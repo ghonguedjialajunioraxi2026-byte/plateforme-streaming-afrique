@@ -1,0 +1,26 @@
+{
+  "name": "FLICK — Streaming en direct",
+  "short_name": "FLICK",
+  "description": "FLICK est une plateforme de streaming en direct pensée pour les créateurs et les communautés africaines.",
+  "lang": "fr",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#060A0D",
+  "theme_color": "#060A0D",
+  "icons": [
+    {
+      "src": "/FLICK.png",
+      "sizes": "any",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/FLICK.png",
+      "sizes": "any",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}
